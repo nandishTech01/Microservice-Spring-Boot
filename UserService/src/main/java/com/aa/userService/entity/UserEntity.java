@@ -65,4 +65,8 @@ public class UserEntity extends BaseCreatedEntity {
     @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true, mappedBy = "userEntity")
     private List<PasswordHistoryEntity> passwordHistoryEntities;
 
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true, mappedBy = "userEntity")
+    private List<OtpHistory> otpHistoryEntities;
 }

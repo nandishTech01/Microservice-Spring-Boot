@@ -1,13 +1,13 @@
 package com.aa.userservice.controller;
 
 
-import com.aa.userservice.dto.request.LoginRequestDto;
-import com.aa.userservice.dto.request.VerifyOtpRequestDto;
+import com.aa.userservice.dto.request.*;
 import com.aa.userservice.dto.response.ResponseDto;
 import com.aa.userservice.service.UserService;
 import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -33,12 +33,28 @@ public class UserController {
         return ResponseEntity.ok(userService.verifyOtp(dto));
     }
 
-    @PostMapping("/refresh-token")
-    public ResponseEntity<ResponseDto> refreshAccessToken(@RequestParam String token){
-        return ResponseEntity.ok(userService.refreshAccessToken(token));
+    @PostMapping("/changePassword")
+    public ResponseEntity<ResponseDto> changePassword(@RequestBody ChangePasswordRequestDto dto) {
+        return ResponseEntity.ok(userService.changePassword(dto));
+    }
+
+    @PostMapping("/forgotPassword")
+    public ResponseEntity<ResponseDto> forgotPassword(@RequestBody ForgotPasswordRequestDto dto) throws MessagingException {
+        return ResponseEntity.ok(userService.forgotPassword(dto));
+    }
+
+    @PostMapping("/refreshToken")
+    public ResponseEntity<ResponseDto> refreshAccessToken(@RequestBody RefreshTokenRequestDto dto){
+        return ResponseEntity.ok(userService.refreshAccessToken(dto));
+    }
+
+    @GetMapping("/validateToken")
+    public ResponseEntity<ResponseDto> validateToken(@RequestParam String token) {
+        return ResponseEntity.ok(userService.validateToken(token));
     }
 
     @PostMapping("/logout")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ResponseDto> logout(@RequestParam String email) {
         return ResponseEntity.ok(userService.logout(email));
     }

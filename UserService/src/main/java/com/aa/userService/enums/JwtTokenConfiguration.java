@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 public enum JwtTokenConfiguration {
 
     AUTH_PUBLIC_KEY("""
-            -----BEGIN PUBLIC KEY-----
+            -----BEGIN PUBLIC KEY-----  
             MIGeMA0GCSqGSIb3DQEBAQUAA4GMADCBiAKBgGMYi2V/gB6TsrwozWTgMnrD2noU
             Y9ZPK4QOkpC/01reUZfv8tEr85b0/aSmN61oyvCsnv/gILveI8E+sZcVtw0PxQf8
             O/aU8cVbldwZPURopz3UqHfTSJfFURT7iTFkJjJgwC7i08PmSzL+eOfYxQETwlh2

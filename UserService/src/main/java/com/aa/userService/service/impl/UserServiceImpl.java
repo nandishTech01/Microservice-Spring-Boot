@@ -3,8 +3,7 @@ package com.aa.userservice.service.impl;
 import com.aa.userservice.Exception.NoDataFoundException;
 import com.aa.userservice.Exception.UserNotFoundException;
 import com.aa.userservice.Exception.ValidationException;
-import com.aa.userservice.dto.request.LoginRequestDto;
-import com.aa.userservice.dto.request.VerifyOtpRequestDto;
+import com.aa.userservice.dto.request.*;
 import com.aa.userservice.dto.response.LoginResponseDto;
 import com.aa.userservice.dto.response.ResponseDto;
 import com.aa.userservice.entity.ConfigurationEntity;
@@ -15,13 +14,16 @@ import com.aa.userservice.enums.*;
 import com.aa.userservice.repository.*;
 import com.aa.userservice.service.EmailService;
 import com.aa.userservice.service.UserService;
+import com.aa.userservice.utils.JwtTokenUtil;
 import com.aa.userservice.utils.OtpGenerator;
+import io.jsonwebtoken.Claims;
 import jakarta.mail.MessagingException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -56,25 +58,24 @@ public class UserServiceImpl implements UserService {
     @Override
     public ResponseDto register(LoginRequestDto dto) throws MessagingException {
         // Validate input
-        if (dto.getEmail() == null || dto.getEmail().isBlank() || dto.getPassword() == null || dto.getPassword().isBlank()) {
+        if (dto.getEmail() == null  || dto.getEmail().isBlank() || dto.getPassword() == null || dto.getPassword().isBlank()) {
             throw new ValidationException("Email and password must be provided.");
         }
         Optional<UserEntity> userEntityOptional = userRepository.findByEmailAndIsActiveTrue(dto.getEmail());
         if (userEntityOptional.isPresent()) {
+            UserEntity userEntity = userEntityOptional.get();
+            if (UserStatus.IN_ACTIVE.equals(userEntity.getStatus())) {
+                throw new ValidationException("The user is inactive. Please contact the system administrator for assistance.");
+            }
+            if (UserStatus.LOCKED.equals(userEntity.getStatus())) {
+                LocalDateTime failedAttemptTime = userEntity.getFailedAttemptTime();
+                long minutesElapsed = Duration.between(failedAttemptTime, LocalDateTime.now()).toMinutes();
+                throw new ValidationException("The user account is locked. Please try again after "
+                        + minutesElapsed + " minutes.");
+            }
             throw new ValidationException("User with this email already exists.");
         }
 
-
-        if (UserStatus.IN_ACTIVE.equals(userEntityOptional.get().getStatus())) {
-            throw new ValidationException("The user is inactive. Please contact the system administrator for assistance.");
-        }
-
-        if (UserStatus.LOCKED.equals(userEntityOptional.get().getStatus())) {
-            LocalDateTime failedAttemptTime = userEntityOptional.get().getFailedAttemptTime();
-            long minutesElapsed = Duration.between(failedAttemptTime, LocalDateTime.now()).toMinutes();
-            throw new ValidationException("The user account is locked. Please try again after "
-                    + minutesElapsed + " minutes.");
-        }
         long passwordValidity = getConfigurationValue(ConfigurationName.PASSWORD_VALIDITY);
 
         UserEntity newUser = UserEntity.builder()
@@ -95,17 +96,7 @@ public class UserServiceImpl implements UserService {
                 .build();
 
         // Generate OTP and send via email
-        String otp = OtpGenerator.generateOtp();
-        sendVerificationEmail(dto.getEmail(), otp);
-
-        UserOtp userOtp = UserOtp.builder()
-                .otp(otp)
-                .type(OtpType.SEND)
-                .userEntity(newUser)
-                .otpTime(LocalDateTime.now())
-                .failedAttempt(0L)
-                .build();
-        userOtpRepository.save(userOtp);
+         generateAndSendOtp(newUser);
 
         return success("Signup successful. OTP sent to your email.",loginResponeDto);
     }
@@ -122,22 +113,11 @@ public class UserServiceImpl implements UserService {
             throw new UserNotFoundException("No User Found with this email.");
         }
 
-        //generate otp and send via Email
-        String otp = OtpGenerator.generateOtp();
-        sendVerificationEmail(dto.getEmail(), otp);
-
         LoginResponseDto loginResponeDto = LoginResponseDto.builder()
                 .userId(userEntityOptional.get().getId())
                 .isFirstLogin(true).build();
 
-        UserOtp userOtp = UserOtp.builder()
-                .otp(otp)
-                .type(OtpType.SEND)
-                .userEntity(userEntityOptional.get())
-                .otpTime(LocalDateTime.now())
-                .failedAttempt(0L)
-                .build();
-        userOtpRepository.save(userOtp);
+        generateAndSendOtp(userEntityOptional.get());
 
         return success(loginResponeDto);
     }
@@ -160,7 +140,9 @@ public class UserServiceImpl implements UserService {
                 throw new ValidationException("OTP Expired. Please Generate a New OTP.");
             }
             recordOtpHistory(userOtpEntity.getOtp(), dto.getOtp(), Status.SUCCESS, userEntity);
-            return ResponseDto.builder().status(Status.SUCCESS).message("OTP Verified Successfully").build();
+            Map<String, String> tokens = generateTokens(userEntity);
+            return success("OTP Verified Successfully", tokens);
+            //  return ResponseDto.builder().status(Status.SUCCESS).message("OTP Verified Successfully").build();
         } else {
             recordOtpHistory(userOtpEntity.getOtp(), dto.getOtp(), Status.FAILURE, userEntity);
             if (userOtpEntity.getFailedAttempt() > maxOtpFailures) {
@@ -183,15 +165,92 @@ public class UserServiceImpl implements UserService {
         }
     }
 
+
+    private Map<String, String> generateTokens(UserEntity userEntity) {
+        Map<String, Object> claims = Map.of(
+                "userId", userEntity.getId(),
+                "email", userEntity.getEmail(),
+                "roles", userEntity.getType().name()
+        );
+
+        String accessToken = JwtTokenUtil.generateAccessToken(userEntity.getEmail(), claims);
+        String refreshToken = JwtTokenUtil.generateRefreshToken(userEntity.getEmail());
+
+        return Map.of(
+                "accessToken", accessToken,
+                "refreshToken", refreshToken
+        );
+    }
+
     @Override
-    public ResponseDto refreshAccessToken(String token) {
-        return null;
+    public ResponseDto refreshAccessToken(RefreshTokenRequestDto dto) {
+        if (!JwtTokenUtil.validateToken(dto.getRefreshToken())) {
+            throw new ValidationException("Invalid or expired refresh token");
+        }
+
+        String email = JwtTokenUtil.extractEmail(dto.getRefreshToken());
+        UserEntity userEntity = userRepository.findByEmailAndIsActiveTrue(email)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        Map<String, Object> claims = Map.of(
+                "userId", userEntity.getId(),
+                "email", userEntity.getEmail(),
+                "roles", userEntity.getType().name()
+        );
+        String newAccessToken = JwtTokenUtil.generateAccessToken(email, claims);
+        return success("Access token refreshed successfully", Map.of("accessToken", newAccessToken));
     }
 
     @Override
     public ResponseDto logout(String email) {
         return null;
     }
+
+    @Override
+    public ResponseDto changePassword(ChangePasswordRequestDto dto) {
+        UserEntity userEntity = this.userRepository.findByIdAndIsActiveTrue(dto.getUserId()).orElseThrow(UserNotFoundException::new);
+        if (!passwordEncoder.matches(dto.getCurrentPassword(), userEntity.getPassword())) {
+            throw new ValidationException("Current password is incorrect");
+        }
+        if (passwordEncoder.matches(dto.getNewPassword(), userEntity.getPassword())) {
+            throw new ValidationException("New password cannot be the same as the current password");
+        }
+        userEntity.setPassword(passwordEncoder.encode(dto.getNewPassword()));
+        userEntity.setLastChangeDate(LocalDateTime.now());
+        userRepository.save(userEntity);
+        return success("Password changed successfully");
+    }
+
+    @Override
+    public ResponseDto forgotPassword(ForgotPasswordRequestDto dto) {
+        UserEntity userEntity = userRepository.findByEmailAndIsActiveTrue(dto.getEmail())
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (UserStatus.IN_ACTIVE.equals(userEntity.getStatus())) {
+            throw new ValidationException("The user is inactive. Please contact the system administrator for assistance.");
+        }
+        if (UserStatus.LOCKED.equals(userEntity.getStatus())) {
+            LocalDateTime failedAttemptTime = userEntity.getFailedAttemptTime();
+            long minutesElapsed = Duration.between(failedAttemptTime, LocalDateTime.now()).toMinutes();
+            throw new ValidationException("The user account is locked. Please try again after "
+                    + minutesElapsed + " minutes.");
+        }
+
+        //send Password
+//        sendVerificationEmail(dto.getEmail(), otp);
+
+        return success("OTP sent to the registered email");
+    }
+
+    public ResponseDto validateToken(String token) {
+        if (JwtTokenUtil.validateToken(token)) {
+            Claims claims = JwtTokenUtil.extractAllClaims(token);
+            return success("Token is valid", claims);
+        } else {
+            throw new ValidationException("Invalid or expired token");
+        }
+    }
+
 
     private void sendVerificationEmail(String email, String otp) throws MessagingException {
         String subject = "Email verification";
@@ -217,4 +276,21 @@ public class UserServiceImpl implements UserService {
                 .build();
         otpHistoryRepository.save(otpHistory);
     }
+
+    public String generateAndSendOtp(UserEntity user) throws MessagingException {
+        String otp = OtpGenerator.generateOtp();
+        sendVerificationEmail(user.getEmail(), otp);
+
+        UserOtp userOtp = UserOtp.builder()
+                .otp(otp)
+                .type(OtpType.SEND)
+                .userEntity(user)
+                .otpTime(LocalDateTime.now())
+                .failedAttempt(0L)
+                .build();
+        userOtpRepository.save(userOtp);
+        return otp;
+    }
+
+
 }
