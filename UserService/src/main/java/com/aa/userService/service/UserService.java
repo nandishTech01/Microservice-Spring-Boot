@@ -7,6 +7,8 @@ import jakarta.mail.MessagingException;
 
 public interface UserService {
 
+    ResponseDto register(LoginRequestDto dto) throws MessagingException;
+
     ResponseDto login(LoginRequestDto dto) throws MessagingException;
 
     ResponseDto verifyOtp(VerifyOtpRequestDto dto);

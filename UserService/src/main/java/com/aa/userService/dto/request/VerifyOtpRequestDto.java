@@ -9,6 +9,6 @@ public class VerifyOtpRequestDto {
 
     private String otp;
 
-    private String userId;
+    private Long userId;
 
 }

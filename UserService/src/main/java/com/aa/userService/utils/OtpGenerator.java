@@ -46,9 +46,5 @@ public class OtpGenerator {
         return result.toString();
     }
 
-    public static void main(String[] args) {
-        // Generate and print a sample OTP
-        System.out.println("Generated OTP: " + generateOtp());
-    }
 }
 
