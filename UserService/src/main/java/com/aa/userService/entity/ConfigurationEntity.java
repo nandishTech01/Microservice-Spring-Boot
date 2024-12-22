@@ -21,8 +21,13 @@ public class ConfigurationEntity extends BaseCreatedEntity {
     private ConfigurationName name;
 
     @NotNull
-    @Column(name = "name")
+    @Column(name = "value")
     private String value;
+
+
+    @NotNull
+    @Column(name = "description")
+    private String description;
 
 
 }

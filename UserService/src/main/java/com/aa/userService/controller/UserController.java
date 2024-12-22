@@ -29,7 +29,7 @@ public class UserController {
     }
 
     @PostMapping("/verifyOtp")
-    public ResponseEntity<ResponseDto> login(@RequestBody VerifyOtpRequestDto dto) throws MessagingException {
+    public ResponseEntity<ResponseDto> verifyOtp(@RequestBody VerifyOtpRequestDto dto) throws MessagingException {
         return ResponseEntity.ok(userService.verifyOtp(dto));
     }
 
